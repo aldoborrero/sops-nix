@@ -27,22 +27,23 @@ import (
 )
 
 type secret struct {
-	Name         string     `json:"name"`
-	Key          string     `json:"key"`
-	Path         string     `json:"path"`
-	Owner        *string    `json:"owner,omitempty"`
-	UID          int        `json:"uid"`
-	Group        *string    `json:"group,omitempty"`
-	GID          int        `json:"gid"`
-	SopsFile     string     `json:"sopsFile"`
-	Format       FormatType `json:"format"`
-	Mode         string     `json:"mode"`
-	RestartUnits []string   `json:"restartUnits"`
-	ReloadUnits  []string   `json:"reloadUnits"`
-	value        []byte
-	mode         os.FileMode
-	owner        int
-	group        int
+	Name          string        `json:"name"`
+	Key           string        `json:"key"`
+	SecretBackend SecretBackend `json:"secretBackend,omitempty"`
+	Path          string        `json:"path"`
+	Owner         *string       `json:"owner,omitempty"`
+	UID           int           `json:"uid"`
+	Group         *string       `json:"group,omitempty"`
+	GID           int           `json:"gid"`
+	SopsFile      string        `json:"sopsFile"`
+	Format        FormatType    `json:"format"`
+	Mode          string        `json:"mode"`
+	RestartUnits  []string      `json:"restartUnits"`
+	ReloadUnits   []string      `json:"reloadUnits"`
+	value         []byte
+	mode          os.FileMode
+	owner         int
+	group         int
 }
 
 type loggingConfig struct {
@@ -68,6 +69,34 @@ type template struct {
 	owner        int
 	group        int
 }
+
+type SecretBackend string
+
+func (s *SecretBackend) UnmarshalJSON(b []byte) error {
+	var str string
+	if err := json.Unmarshal(b, &str); err != nil {
+		return err
+	}
+	backend := SecretBackend(str)
+	switch backend {
+	case "", AGE:
+		*s = AGE
+	case AZURE_KV, GCP_KMS, HC_VAULT, KMS, PGP:
+		*s = backend
+	default:
+		return fmt.Errorf("invalid key source: %s", str)
+	}
+	return nil
+}
+
+const (
+	AGE      SecretBackend = "age"
+	AZURE_KV SecretBackend = "azure_kv"
+	GCP_KMS  SecretBackend = "gcp_kms"
+	HC_VAULT SecretBackend = "hc_vault"
+	KMS      SecretBackend = "kms"
+	PGP      SecretBackend = "pgp"
+)
 
 type manifest struct {
 	Secrets                 []secret          `json:"secrets"`

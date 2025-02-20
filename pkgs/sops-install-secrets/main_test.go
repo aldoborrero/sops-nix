@@ -311,6 +311,164 @@ func TestAgeWithSSH(t *testing.T) {
 	testInstallSecret(t, testdir, &m)
 }
 
+func TestKMS(t *testing.T) {
+	assets := testAssetPath()
+
+	testdir := newTestDir(t)
+	defer testdir.Remove()
+
+	target := path.Join(testdir.path, "existing-target")
+	file, err := os.Create(target)
+	ok(t, err)
+	file.Close()
+
+	nobody := "nobody"
+	nogroup := "nogroup"
+	s := secret{
+		Name:          "test",
+		Key:           "test_key",
+		Owner:         &nobody,
+		Group:         &nogroup,
+		SopsFile:      path.Join(assets, "secrets.yaml"),
+		Path:          target,
+		Mode:          "0400",
+		SecretBackend: KMS,
+		RestartUnits:  []string{"affected-service"},
+		ReloadUnits:   []string{"affected-reload-service"},
+	}
+
+	m := manifest{
+		Secrets:           []secret{s},
+		SecretsMountPoint: testdir.secretsPath,
+		SymlinkPath:       testdir.symlinkPath,
+	}
+
+	testInstallSecret(t, testdir, &m)
+}
+
+func TestVault(t *testing.T) {
+	assets := testAssetPath()
+
+	testdir := newTestDir(t)
+	defer testdir.Remove()
+
+	target := path.Join(testdir.path, "existing-target")
+	file, err := os.Create(target)
+	ok(t, err)
+	file.Close()
+
+	nobody := "nobody"
+	nogroup := "nogroup"
+	s := secret{
+		Name:          "test",
+		Key:           "test_key",
+		Owner:         &nobody,
+		Group:         &nogroup,
+		SopsFile:      path.Join(assets, "secrets.yaml"),
+		Path:          target,
+		Mode:          "0400",
+		SecretBackend: HC_VAULT,
+		RestartUnits:  []string{"affected-service"},
+		ReloadUnits:   []string{"affected-reload-service"},
+	}
+
+	m := manifest{
+		Secrets:           []secret{s},
+		SecretsMountPoint: testdir.secretsPath,
+		SymlinkPath:       testdir.symlinkPath,
+	}
+
+	testInstallSecret(t, testdir, &m)
+}
+
+func TestSecretBackendValidation(t *testing.T) {
+	assets := testAssetPath()
+
+	testdir := newTestDir(t)
+	defer testdir.Remove()
+
+	s := secret{
+		Name:     "test",
+		Key:      "test_key",
+		SopsFile: path.Join(assets, "secrets.yaml"),
+		Path:     path.Join(testdir.path, "test-target"),
+		Mode:     "0400",
+	}
+
+	testCases := []struct {
+		name          string
+		manifest      manifest
+		expectErr     bool
+		errorContains string
+	}{
+		{
+			name: "valid_kms",
+			manifest: manifest{
+				Secrets:           []secret{s},
+				SecretsMountPoint: testdir.secretsPath,
+				SymlinkPath:       testdir.symlinkPath,
+			},
+			expectErr: false,
+		},
+		{
+			name: "valid_vault",
+			manifest: manifest{
+				Secrets: []secret{
+					{
+						Name:          "test",
+						Key:           "test_key",
+						SopsFile:      path.Join(assets, "secrets.yaml"),
+						Path:          path.Join(testdir.path, "test-target"),
+						Mode:          "0400",
+						SecretBackend: HC_VAULT,
+					},
+				},
+				SecretsMountPoint: testdir.secretsPath,
+				SymlinkPath:       testdir.symlinkPath,
+			},
+			expectErr: false,
+		},
+		{
+			name: "unsupported_key_source",
+			manifest: manifest{
+				Secrets: []secret{
+					{
+						Name:          "test",
+						Key:           "test_key",
+						SopsFile:      path.Join(assets, "secrets.yaml"),
+						Path:          path.Join(testdir.path, "test-target"),
+						Mode:          "0400",
+						SecretBackend: SecretBackend("unsupported"),
+					},
+				},
+				SecretsMountPoint: testdir.secretsPath,
+				SymlinkPath:       testdir.symlinkPath,
+			},
+			expectErr:     true,
+			errorContains: "invalid key source",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeManifest(t, testdir.path, &tc.manifest)
+			err := installSecrets([]string{"sops-install-secrets", "-check-mode=manifest", path})
+
+			if tc.expectErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				} else if !strings.Contains(err.Error(), tc.errorContains) {
+					t.Errorf("expected error containing %q but got %q", tc.errorContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestAll(t *testing.T) {
 	// we can't test in parallel because we rely on GNUPGHOME environment variable
 	testGPG(t)
